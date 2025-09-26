@@ -1,0 +1,71 @@
+# © 2025 Amazon Web Services, Inc. or its affiliates. All Rights Reserved.
+# This AWS Content is provided subject to the terms of the AWS Customer Agreement available at
+# http://aws.amazon.com/agreement or other written agreement between Customer and either
+# Amazon Web Services, Inc. or Amazon Web Services EMEA SARL or both.
+
+# Example Terraform Infrastructure Update Configuration
+# Copy this file to config.yaml and customize for your repositories
+
+repositories:
+  - owner: "your-github-org"           # Your GitHub organization or username
+    repo: "your-terraform-repo"        # Repository name
+    files:
+      - path: "variables.tf"           # Path to Terraform file
+        changes:
+          variables:                   # Variable block changes
+            - app_version:             # Variable name
+                default:               # Parameter to modify
+                  update:              # Action type
+                    - from: ["1.0.0"]  # Current values to match
+                      to: "1.1.0"      # New value to set
+                  param_not_found:     # What to do if parameter doesn't exist
+                    action: add        # Options: skip, add, error
+                    value: "1.1.0"     # Value to add if missing
+      
+      - path: "main.tf"
+        changes:
+          resources:                   # Resource block changes
+            - aws_instance.web:        # Resource identifier
+                instance_type:         # Parameter to modify
+                  update:
+                    - from: ["t3.micro", "t3.small"]
+                      to: "t3.medium"
+                  param_not_found:
+                    action: error      # Fail if critical parameter missing
+                
+                # Example of nested parameter
+                root_block_device.volume_size:
+                  update:
+                    - from: ["20"]
+                      to: "40"
+                  param_not_found:
+                    action: add
+                    value: "40"
+          
+          modules:                     # Module block changes
+            - vpc:                     # Module name
+                version:               # Parameter to modify
+                  update:
+                    - from: ["2.0.0"]
+                      to: "2.1.0"
+                  param_not_found:
+                    action: add
+                    value: "2.1.0"
+
+# Global settings (optional)
+settings:
+  base_branch: "main"
+  pr_title_template: "🔧 Infrastructure Update - {{timestamp}}"
+  create_pr: true
+  commit_message_template: "Automated Terraform update"
+  
+  # Slack integration settings (optional)
+  slack:
+    username: "Terraform Bot"
+    icon_emoji: ":terraform:"
+    notify_on_success: true
+    notify_on_error: true
+    notify_batch_summary: true
+    include_changes_summary: true
+    max_changes_displayed: 5
+    include_workflow_links: true

@@ -1,0 +1,164 @@
+# © 2025 Amazon Web Services, Inc. or its affiliates. All Rights Reserved.
+# This AWS Content is provided subject to the terms of the AWS Customer Agreement available at
+# http://aws.amazon.com/agreement or other written agreement between Customer and either
+# Amazon Web Services, Inc. or Amazon Web Services EMEA SARL or both.
+
+# Terraform Infrastructure Update Configuration
+# This configuration demonstrates the enhanced capabilities of the automation tool
+
+repositories:
+  - owner: "your-github-org"
+    repo: "your-terraform-repo"
+    files:
+      - path: "resources.tf"
+        changes:
+          resources:
+            - aws_security_group_rule.all_worker_mgmt_ingress:
+                description:
+                  update:
+                    - from: ["allow inbound traffic from eks"]
+                      to: "Allow inbound traffic from EKS cluster"
+                  param_not_found:
+                    action: add
+                    value: "Allow inbound traffic from EKS cluster"
+                
+                cidr_blocks:
+                  update:
+                    - from: ["['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']"]
+                      to: ["10.0.0.0/8", "192.16.2.2/16"]
+                  param_not_found:
+                    action: add
+                    value: ["10.0.0.0/8", "192.16.2.2/16"]
+            
+            - aws_instance.this:
+                # Nested parameter support - spot pricing configuration
+                instance_market_options.spot_options.max_price:
+                  update:
+                    - from: ["0.0031"]
+                      to: "0.005"
+                  param_not_found:
+                    action: add
+                    value: "0.005"
+            
+            - aws_instance.example:
+                # Nested parameter - lifecycle precondition
+                lifecycle.precondition.condition:
+                  update:
+                    - from: ['data.aws_ami.example.architecture == "x86_64"']
+                      to: 'data.aws_ami.example.architecture == "x86_6456"'
+                  param_not_found:
+                    action: add
+                    value: 'data.aws_ami.example.architecture == "x86_6456"'
+
+      - path: "variables.tf"
+        changes:
+          variables:
+            - kubernetes_version:
+                default:
+                  update:
+                    - from: ["1.27"]
+                      to: "1.28"
+                  param_not_found:
+                    action: add
+                    value: "1.28"
+            
+            - vpc_cidr:
+                default:
+                  update:
+                    - from: ['"10.0.0.0/16"']
+                      to: "10.1.0.0/16"
+                  param_not_found:
+                    action: add
+                    value: "10.1.0.0/16"
+
+      - path: "vpc.tf"
+        changes:
+          modules:
+            - vpc:
+                version:
+                  update:
+                    - from: ["5.7.0"]
+                      to: "5.8.1"
+                  param_not_found:
+                    action: add
+                    value: "5.8.1"
+
+# Additional example repository for demonstration
+  - owner: "your-github-org"
+    repo: "terraform-modules"
+    files:
+      - path: "modules/eks/variables.tf"
+        changes:
+          variables:
+            - cluster_version:
+                default:
+                  update:
+                    - from: ["1.27", "1.28"]
+                      to: "1.29"
+                  param_not_found:
+                    action: error  # Critical parameter must exist
+            
+            - node_group_instance_types:
+                default:
+                  update:
+                    - from: ['["t3.medium", "t3.large"]']
+                      to: '["t3.large", "t3.xlarge"]'
+                  param_not_found:
+                    action: add
+                    value: '["t3.large", "t3.xlarge"]'
+
+      - path: "modules/rds/main.tf"
+        changes:
+          resources:
+            - aws_db_instance.main:
+                engine_version:
+                  update:
+                    - from: ["13.7", "13.8"]
+                      to: "13.9"
+                  param_not_found:
+                    action: add
+                    value: "13.9"
+                
+                # Example of nested parameter in RDS
+                performance_insights_configuration.enabled:
+                  update:
+                    - from: ["false"]
+                      to: "true"
+                  param_not_found:
+                    action: add
+                    value: "true"
+
+# Global settings for the automation tool
+settings:
+  # Base branch to create feature branches from
+  base_branch: "main"
+  
+  # Template for PR titles (supports {{timestamp}} placeholder)
+  pr_title_template: "🚀 Update Terraform infrastructure configuration - {{timestamp}}"
+  
+  # Whether to create pull requests (true) or just commit to branches (false)
+  create_pr: true
+  
+  # Custom commit message template (optional)
+  commit_message_template: "Automated Terraform update: Infrastructure improvements"
+  
+  # Enhanced Slack notification settings (optional)
+  slack:
+    # Display name for the bot in Slack
+    username: "Terraform Bot"
+    
+    # Emoji to display as bot avatar
+    icon_emoji: ":terraform:"
+    
+    # Optional channel override (if different from webhook default)
+    # channel: "#infrastructure"
+    
+    # Notification preferences
+    notify_on_success: true         # Send notifications for successful PRs
+    notify_on_error: true           # Send notifications for errors
+    notify_batch_summary: true      # Send summary notification at completion
+    
+    # Rich formatting options
+    include_changes_summary: true   # Include detailed changes in notifications
+    max_changes_displayed: 5        # Maximum number of changes to show in summary
+    include_workflow_links: true    # Include links to GitHub Actions runs

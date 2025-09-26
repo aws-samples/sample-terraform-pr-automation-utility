@@ -1,0 +1,53 @@
+# Copyright checking ignore patterns
+# Binary and data files that don't contain copyright information
+*.zip
+*.png
+*.PNG
+*.jpg
+*.jpeg
+*.JPEG
+*.JPG
+*.gif
+*.GIF
+*.csv
+*.xlsx
+*.xls
+*.pdf
+*.PDF
+
+# Configuration files that typically don't need copyright
+*.md
+*.MD
+*.json
+*.yml
+*.yaml
+*.txt
+*.toml
+*.ini
+*.cfg
+requirements*.txt
+
+# Generated files
+*.log
+*.tmp
+*.temp
+*.cache
+*.pyc
+__pycache__/
+
+# Lock files
+*.lock
+package-lock.json
+Pipfile.lock
+poetry.lock
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Terraform state files (if any)
+*.tfstate
+*.tfstate.backup
+.terraform/
