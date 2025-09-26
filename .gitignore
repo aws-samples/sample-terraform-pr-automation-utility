@@ -1,0 +1,96 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Terraform automation specific
+temp_file.tf
+terraform-automation-*.log
+*.log
+
+# Configuration (if containing secrets)
+config.local.yaml
+config.prod.yaml
+config.dev.yaml
+config.secret.yaml
+
+# Secrets and sensitive data
+.secrets/
+secrets.yaml
+webhook-urls.txt
+*.pem
+*.key
+*.cert
+
+# Security scanner reports
+gl-sast-report.json
+gl-secret-detection-report.json
+gl-sast-iac-report.json
+gl-dependency-scanning-report.json
+security-report-*.json
+
+# Local test files
+temp_file.tf
+*.tmp
+*.temp
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Test artifacts
+.pytest_cache/
+.tox/
+
+# Documentation build
+docs/_build/

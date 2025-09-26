@@ -1,0 +1,47 @@
+# Gitleaks configuration for secret detection
+# Documentation: https://github.com/gitleaks/gitleaks
+
+title = "Gitleaks Configuration for Terraform Automation Tool"
+
+# Extend the base rules
+[extend]
+useDefault = true
+
+# Global allowlist
+[allowlist]
+description = "Global allowlisted files and paths"
+paths = [
+    '''README\.md''',  # Contains example webhook URLs in documentation
+    '''.*\.example\..*''',  # Example files may contain dummy secrets
+    '''.*\.test\..*''',  # Test files may contain dummy secrets
+]
+
+# Allow example/dummy values in documentation
+[[rules]]
+id = "allow-example-webhook-urls"
+description = "Allow example Slack webhook URLs in documentation"
+regex = '''https://hooks\.slack\.com/services/[A-Za-z0-9+/]+'''
+path = '''(README\.md|.*\.example\.yaml|.*\.example\.yml)'''
+allowlist = true
+
+# Additional custom rules for common false positives
+[[rules]]
+id = "allow-terraform-examples"
+description = "Allow example AWS account IDs and resource IDs in Terraform files"
+regex = '''(ami-[a-z0-9]{8}|sg-[a-z0-9]{8}|subnet-[a-z0-9]{8})'''
+path = '''.*\.tf'''
+allowlist = true
+
+# Exclude generated files
+[allowlist.files]
+description = "Files to exclude from scanning"
+paths = [
+    '''.*\.log''',
+    '''.*\.tmp''',
+    '''.*\.tfstate''',
+    '''.*\.tfstate\.backup''',
+    '''.terraform/.*''',
+]
+
+# Version requirement
+version = "8.0"

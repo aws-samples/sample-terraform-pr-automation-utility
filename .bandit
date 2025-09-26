@@ -1,0 +1,8 @@
+rules: []
+
+paths:
+  exclude:
+    - "*.md"  # Exclude markdown files from code analysis
+    - "*.txt"  # Exclude text files
+    - "*.yaml"  # Exclude YAML configuration files
+    - "*.yml"  # Exclude YAML configuration files

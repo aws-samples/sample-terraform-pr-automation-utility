@@ -1,0 +1,23 @@
+# Checkov configuration for Infrastructure as Code security scanning
+# Documentation: https://www.checkov.io/
+
+# Now including github-test-contents since security issues are fixed
+# No paths are excluded from scanning
+
+# Skip specific checks that are by design for this tool
+skip-check:
+  # GitHub Actions checks
+  - CKV_GHA_7  # workflow_dispatch inputs are required for flexibility
+  - CKV2_GHA_1  # Permissions are intentionally set at job level
+
+compact: true
+framework:
+  - terraform
+  - github_actions
+  - dockerfile
+
+# Output format
+output: cli
+
+# Enable new checks automatically
+download-external-modules: true

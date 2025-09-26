@@ -1,0 +1,58 @@
+# You can override the included template(s) by including variable overrides
+# SAST customization: https://docs.gitlab.com/ee/user/application_security/sast/#customizing-the-sast-settings
+# Secret Detection customization: https://docs.gitlab.com/ee/user/application_security/secret_detection/pipeline/#customization
+# Dependency Scanning customization: https://docs.gitlab.com/ee/user/application_security/dependency_scanning/#customizing-the-dependency-scanning-settings
+# Container Scanning customization: https://docs.gitlab.com/ee/user/application_security/container_scanning/#customizing-the-container-scanning-settings
+# Note that environment variables can be set in several places
+# See https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence
+stages:
+  - test
+  - security
+
+# Global variables for all security scanners
+variables:
+  # No exclusions needed - all test modules have been secured
+  SAST_BANDIT_EXCLUDED_PATHS: ""
+  SECRET_DETECTION_EXCLUDED_PATHS: ""
+  
+  # Additional configuration for better scanning
+  SAST_DISABLED: "false"
+  SECRET_DETECTION_DISABLED: "false"
+  SAST_IaC_DISABLED: "false"
+
+# Python SAST scanning with Bandit
+sast:
+  stage: security
+  variables:
+    SAST_BANDIT_LEVEL: 1  # Report all severity levels
+
+# Secret Detection
+secret_detection:
+  stage: security
+  variables:
+    SECRET_DETECTION_EXCLUDED_FILES: "README.md"  # Example webhook URLs in documentation
+
+# Infrastructure as Code scanning
+iac-sast:
+  stage: security
+  variables:
+    # Scan all Terraform files including test modules
+    SAST_IaC_DISABLED: "false"
+
+# Dependency scanning for Python packages
+dependency_scanning:
+  stage: security
+
+# Container scanning if Dockerfiles are added
+container_scanning:
+  stage: security
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_DOCKERFILE_PATH
+
+# Include GitLab's security templates
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/SAST-IaC.latest.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/Dependency-Scanning.gitlab-ci.yml
+  - template: Security/Container-Scanning.gitlab-ci.yml
