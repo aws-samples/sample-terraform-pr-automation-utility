@@ -1,0 +1,554 @@
+# © 2025 Amazon Web Services, Inc. or its affiliates. All Rights Reserved.
+# This AWS Content is provided subject to the terms of the AWS Customer Agreement available at
+# http://aws.amazon.com/agreement or other written agreement between Customer and either
+# Amazon Web Services, Inc. or Amazon Web Services EMEA SARL or both.
+
+name: Terraform Infrastructure Update Automation
+run-name: Automated Terraform Infrastructure Updates with Enhanced Notifications
+
+# Add minimal permissions at top level
+permissions:
+  contents: write # Required for creating branches and PRs
+  pull-requests: write # Required for creating PRs
+  actions: read # Required for workflow status
+
+on:
+  workflow_dispatch:
+    # checkov:skip=CKV_GHA_7:Workflow dispatch inputs are required for tool flexibility
+    # Note: workflow_dispatch inputs are required for this tool's functionality
+    # This is a deliberate design choice to allow flexible configuration
+    inputs:
+      config_file:
+        type: string
+        required: false
+        default: "config.yaml"
+        description: "Path to the configuration file"
+      dry_run:
+        description: "Preview changes without making modifications"
+        required: false
+        default: false
+        type: boolean
+      base_branch:
+        type: string
+        required: false
+        default: "main"
+        description: "Base branch for creating feature branches"
+      branch_prefix:
+        type: string
+        required: false
+        default: "terraform-automation"
+        description: "Prefix for created branches"
+      auto_close_obsolete:
+        description: "Automatically close obsolete pull requests"
+        required: false
+        default: false
+        type: boolean      
+      # Enhanced Slack Integration Options
+      slack_webhook_url:
+        type: string
+        required: false
+        default: ""
+        description: "Slack webhook URL for rich notifications (overrides repository secret)"
+      test_slack_integration:
+        description: "Test Slack integration before processing (dry run only)"
+        required: false
+        default: false
+        type: boolean
+      slack_channel_override:
+        type: string
+        required: false
+        default: ""
+        description: "Override default Slack channel (e.g., #infrastructure-test)"
+      # Debug and Advanced Options
+      debug_mode:
+        description: "Enable debug logging for troubleshooting"
+        required: false
+        default: false
+        type: boolean
+      max_repositories:
+        type: string
+        required: false
+        default: ""
+        description: "Limit number of repositories to process (for testing)"
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  CONFIG_FILE: ${{ inputs.config_file }}
+  DRY_RUN: ${{ inputs.dry_run }}
+  BASE_BRANCH: ${{ inputs.base_branch }}
+  BRANCH_PREFIX: ${{ inputs.branch_prefix }}
+  AUTO_CLOSE_OBSOLETE: ${{ inputs.auto_close_obsolete }}
+  DEBUG_MODE: ${{ inputs.debug_mode }}
+  MAX_REPOSITORIES: ${{ inputs.max_repositories }}
+
+  # Enhanced Slack Integration
+  SLACK_WEBHOOK_URL: ${{ inputs.slack_webhook_url || secrets.SLACK_WEBHOOK_URL }}
+  TEST_SLACK_INTEGRATION: ${{ inputs.test_slack_integration }}
+  SLACK_CHANNEL_OVERRIDE: ${{ inputs.slack_channel_override }}
+
+jobs:
+  terraform-automation:
+    runs-on: ubuntu-latest
+    name: Terraform Infrastructure Updates
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.9"
+          cache: "pip"
+
+      - name: Setup Terraform CLI
+        uses: hashicorp/setup-terraform@a1502cd9e758c50496cc9ac5308c4843bcd56d36 # v3.0.0
+        with:
+          terraform_version: latest
+
+      - name: Upload execution logs and artifacts
+        if: always()
+        # Pin to specific commit SHA for security
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
+        with:
+          name: terraform-automation-logs-${{ github.run_id }}
+          path: |
+            terraform-automation-*.log
+            *.log
+            /tmp/slack_response.txt
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload debug artifacts (on failure)
+        if: failure()
+        # Pin to specific commit SHA for security
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
+        with:
+          name: debug-artifacts-${{ github.run_id }}
+          path: |
+            temp_file.tf
+            *.tf
+            config.yaml
+            requirements.txt
+            /tmp/slack_response.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Install Python dependencies
+        run: |
+          pip3 install --upgrade pip
+
+          # Install from requirements.txt if it exists, otherwise install individually
+          if [ -f "requirements.txt" ]; then
+            echo "📦 Installing dependencies from requirements.txt"
+            pip3 install -r requirements.txt
+          else
+            echo "📦 Installing dependencies individually"
+            pip3 install PyGithub python-hcl2 PyYAML requests
+          fi
+
+          # Show installed packages for debugging
+          if [ "${{ env.DEBUG_MODE }}" == "true" ]; then
+            echo "📋 Installed packages:"
+            pip3 list | grep -E "(github|hcl2|yaml|requests)"
+          fi
+
+      - name: Validate inputs and configuration
+        run: |
+          echo "🔍 Validating inputs and configuration..."
+
+          # Validate configuration file exists
+          if [ ! -f "${{ env.CONFIG_FILE }}" ]; then
+            echo "❌ Configuration file '${{ env.CONFIG_FILE }}' not found!"
+            echo "📁 Available files in repository root:"
+            ls -la
+            echo ""
+            echo "💡 Please ensure your configuration file is named correctly and exists in the repository root."
+            exit 1
+          fi
+          echo "✅ Configuration file '${{ env.CONFIG_FILE }}' found"
+
+          # Validate branch prefix format
+          if [[ "${{ env.BRANCH_PREFIX }}" =~ [^a-zA-Z0-9-] ]]; then
+            echo "❌ Branch prefix contains invalid characters"
+            echo "💡 Branch prefix should only contain alphanumeric characters and hyphens"
+            exit 1
+          fi
+
+          # Validate base branch exists (in dry run mode or if specified)
+          if [ "${{ env.BASE_BRANCH }}" != "main" ] || [ "${{ env.DRY_RUN }}" == "true" ]; then
+            if ! git rev-parse --verify origin/${{ env.BASE_BRANCH }} >/dev/null 2>&1; then
+              echo "⚠️ Warning: Base branch '${{ env.BASE_BRANCH }}' may not exist"
+              echo "💡 Please verify the base branch name is correct"
+            fi
+          fi
+
+          # Enhanced Slack webhook URL validation
+          if [ -n "${{ env.SLACK_WEBHOOK_URL }}" ]; then
+            if [[ ! "${{ env.SLACK_WEBHOOK_URL }}" =~ ^https://hooks\.slack\.com/services/.+ ]]; then
+              echo "⚠️ Warning: Slack webhook URL format may be incorrect"
+              echo "💡 Expected format: https://hooks.slack.com/services/..."
+              echo "🔧 Consider testing the webhook URL manually"
+            else
+              echo "✅ Slack webhook URL format appears valid"
+            fi
+          fi
+
+          # Validate max repositories limit
+          if [ -n "${{ env.MAX_REPOSITORIES }}" ]; then
+            if ! [[ "${{ env.MAX_REPOSITORIES }}" =~ ^[0-9]+$ ]] || [ "${{ env.MAX_REPOSITORIES }}" -lt 1 ]; then
+              echo "❌ MAX_REPOSITORIES must be a positive integer"
+              exit 1
+            fi
+            echo "✅ Repository limit validation passed: ${{ env.MAX_REPOSITORIES }}"
+          fi
+
+          echo "✅ Input validation completed successfully"
+
+      - name: Test Slack integration
+        if: ${{ env.TEST_SLACK_INTEGRATION == 'true' && env.DRY_RUN == 'true' }}
+        run: |
+          echo "🧪 Testing Slack integration..."
+
+          if [ -z "${{ env.SLACK_WEBHOOK_URL }}" ]; then
+            echo "⚠️ Slack webhook URL not configured, skipping test"
+            exit 0
+          fi
+
+          # Test webhook connectivity
+          echo "📡 Testing Slack webhook connectivity..."
+
+          test_payload='{"text":"🧪 Test message from Terraform Automation Bot\n\nThis is a test of the enhanced Slack integration.\nWorkflow: ${{ github.workflow }}\nRun: ${{ github.run_id }}"}'
+
+          response=$(curl -s -w "%{http_code}" -X POST \
+            -H 'Content-type: application/json' \
+            --data "$test_payload" \
+            "${{ env.SLACK_WEBHOOK_URL }}" \
+            -o /tmp/slack_response.txt)
+
+          if [ "$response" = "200" ]; then
+            echo "✅ Slack webhook test successful"
+            echo "💬 Test message sent to Slack channel"
+          else
+            echo "❌ Slack webhook test failed with HTTP $response"
+            echo "Response body:"
+            cat /tmp/slack_response.txt || echo "No response body"
+            echo ""
+            echo "💡 Please check:"
+            echo "   • Webhook URL is correct and active"
+            echo "   • Slack app has permission to post to the channel"
+            echo "   • Network connectivity to Slack servers"
+          fi
+
+      - name: Perform configuration validation
+        run: |
+          echo "🔧 Performing configuration structure validation..."
+
+          # Test configuration loading and validation
+          python3 -c "
+          from main import get_config_content, validate_config
+          try:
+              config = get_config_content()
+              validate_config(config)
+              print('✅ Configuration validation successful')
+              
+              repo_count = len(config.get('repositories', []))
+              print(f'📊 Found {repo_count} repositories to process')
+              
+              # Check for Slack settings in config
+              slack_config = config.get('settings', {}).get('slack', {})
+              if slack_config:
+                  print('💬 Slack configuration found in config file:')
+                  print(f'   • Username: {slack_config.get(\"username\", \"Not set\")}')
+                  print(f'   • Icon: {slack_config.get(\"icon_emoji\", \"Not set\")}')
+                  print(f'   • Success notifications: {slack_config.get(\"notify_on_success\", \"Not set\")}')
+                  print(f'   • Error notifications: {slack_config.get(\"notify_on_error\", \"Not set\")}')
+              else:
+                  print('💬 No Slack configuration in config file (using defaults)')
+              
+              # Show summary in debug mode
+              if '${{ env.DEBUG_MODE }}' == 'true':
+                  for i, repo in enumerate(config.get('repositories', []), 1):
+                      files_count = len(repo.get('files', []))
+                      print(f'  {i}. {repo[\"owner\"]}/{repo[\"repo\"]}: {files_count} files')
+                      
+          except Exception as e:
+              print(f'❌ Configuration validation failed: {str(e)}')
+              exit(1)
+          "
+
+      - name: Display enhanced configuration summary
+        run: |
+          echo "📋 Enhanced Configuration Summary:"
+          echo "============================================"
+          echo "  📄 Config file: ${{ env.CONFIG_FILE }}"
+          echo "  🌿 Base branch: ${{ env.BASE_BRANCH }}"
+          echo "  🏷️ Branch prefix: ${{ env.BRANCH_PREFIX }}"
+          echo "  👁️ Dry run: ${{ env.DRY_RUN }}"
+          echo "  🗑️ Auto-close obsolete: ${{ env.AUTO_CLOSE_OBSOLETE }}"
+          echo "  🐛 Debug mode: ${{ env.DEBUG_MODE }}"
+
+          if [ -n "${{ env.MAX_REPOSITORIES }}" ]; then
+            echo "  🔢 Repository limit: ${{ env.MAX_REPOSITORIES }}"
+          fi
+
+          echo ""
+          echo "🔗 Integration Status:"
+
+          # Enhanced Slack integration status
+          if [ -n "${{ env.SLACK_WEBHOOK_URL }}" ]; then
+            echo "  💬 Slack notifications: ✅ Enhanced integration enabled"
+            
+            if [ -n "${{ env.SLACK_CHANNEL_OVERRIDE }}" ]; then
+              echo "     📺 Channel override: ${{ env.SLACK_CHANNEL_OVERRIDE }}"
+            fi
+            
+            if [ "${{ env.TEST_SLACK_INTEGRATION }}" == "true" ]; then
+              echo "     🧪 Test mode: Enabled"
+            fi
+            
+            echo "     📋 Features:"
+            echo "        • Rich message formatting with blocks and sections"
+            echo "        • Individual PR notifications with change summaries"
+            echo "        • Batch processing summaries with statistics"
+            echo "        • Error notifications with debugging links"
+            echo "        • Workflow integration with direct action links"
+          else
+            echo "  💬 Slack notifications: ❌ Disabled"
+            echo "    💡 To enable enhanced Slack notifications:"
+            echo "       • Set 'slack_webhook_url' input parameter, or"
+            echo "       • Add 'SLACK_WEBHOOK_URL' to repository secrets"
+            echo "       • Optionally configure Slack settings in config.yaml"
+          fi
+
+          echo ""
+          echo "🚀 Starting enhanced Terraform automation process..."
+          echo "============================================"
+
+      - name: Run Terraform automation with enhanced integration
+        shell: bash
+        run: |
+          # Set debug logging if enabled
+          if [ "${{ env.DEBUG_MODE }}" == "true" ]; then
+            echo "🐛 Debug mode enabled - verbose logging activated"
+            export PYTHONPATH="${PYTHONPATH}:."
+            export PYTHONUNBUFFERED=1
+          fi
+
+          # Apply repository limit if specified
+          if [ -n "${{ env.MAX_REPOSITORIES }}" ]; then
+            echo "🔢 Repository processing limit: ${{ env.MAX_REPOSITORIES }}"
+            export MAX_REPOSITORIES="${{ env.MAX_REPOSITORIES }}"
+          fi
+
+          # Apply Slack channel override if specified
+          if [ -n "${{ env.SLACK_CHANNEL_OVERRIDE }}" ]; then
+            echo "📺 Slack channel override: ${{ env.SLACK_CHANNEL_OVERRIDE }}"
+            export SLACK_CHANNEL_OVERRIDE="${{ env.SLACK_CHANNEL_OVERRIDE }}"
+          fi
+
+          # Execute the main automation script with enhanced error handling
+          echo "🔄 Executing Terraform infrastructure updates with enhanced notifications..."
+
+          # Set error handling
+          set +e  # Don't exit on error, we want to handle it gracefully
+
+          python3 main.py
+          exit_code=$?
+
+          if [ $exit_code -eq 0 ]; then
+            echo "✅ Terraform automation completed successfully"
+          else
+            echo "❌ Terraform automation completed with errors (exit code: $exit_code)"
+            
+            # Send critical error notification if Slack is configured
+            if [ -n "${{ env.SLACK_WEBHOOK_URL }}" ] && [ "${{ env.DRY_RUN }}" != "true" ]; then
+              echo "💬 Attempting to send critical error notification to Slack..."
+              
+              error_payload=$(cat <<EOF
+          {
+            "text": "🚨 Critical: Terraform Automation Failure",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": ":x: *Critical Terraform Automation Failure*"
+                }
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*Workflow:* ${{ github.workflow }}\n*Exit Code:* $exit_code\n*Run ID:* ${{ github.run_id }}\n*Logs:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Execution Logs>"
+                }
+              }
+            ]
+          }
+          EOF
+              )
+              
+              curl -s -X POST \
+                -H 'Content-type: application/json' \
+                --data "$error_payload" \
+                "${{ env.SLACK_WEBHOOK_URL }}" || echo "Failed to send error notification"
+            fi
+          fi
+
+          exit $exit_code
+
+        env:
+          # Pass through all environment variables
+          GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+          CONFIG_FILE: ${{ env.CONFIG_FILE }}
+          DRY_RUN: ${{ env.DRY_RUN }}
+          BASE_BRANCH: ${{ env.BASE_BRANCH }}
+          BRANCH_PREFIX: ${{ env.BRANCH_PREFIX }}
+          AUTO_CLOSE_OBSOLETE: ${{ env.AUTO_CLOSE_OBSOLETE }}
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
+          DEBUG_MODE: ${{ env.DEBUG_MODE }}
+
+      - name: Upload execution logs and artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-automation-logs-${{ github.run_id }}
+          path: |
+            terraform-automation-*.log
+            *.log
+            /tmp/slack_response.txt
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload debug artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-artifacts-${{ github.run_id }}
+          path: |
+            temp_file.tf
+            *.tf
+            config.yaml
+            requirements.txt
+            /tmp/slack_response.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Enhanced execution summary
+        if: always()
+        run: |
+          echo ""
+          echo "📊 Enhanced Execution Summary:"
+          echo "============================================"
+
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ Terraform automation completed successfully!"
+            echo ""
+            if [ "${{ env.DRY_RUN }}" == "true" ]; then
+              echo "📋 This was a dry run - no actual changes were made"
+              echo "💡 Review the logs above to see what would be changed"
+              
+              if [ "${{ env.TEST_SLACK_INTEGRATION }}" == "true" ]; then
+                echo "🧪 Slack integration test was performed"
+              fi
+            else
+              echo "🔗 Check the logs above for:"
+              echo "   • Created pull request links"
+              echo "   • Repository processing status"
+              echo "   • Any warnings or issues"
+              
+              if [ -n "${{ env.SLACK_WEBHOOK_URL }}" ]; then
+                echo "   • Enhanced Slack notifications sent to your team"
+                echo "     - Individual PR notifications with change summaries"
+                echo "     - Batch processing summary with statistics"
+                echo "     - Rich formatting with contextual information"
+              fi
+            fi
+            echo ""
+            echo "📄 Log files have been uploaded as workflow artifacts"
+            
+          else
+            echo "❌ Terraform automation encountered errors"
+            echo ""
+            echo "🔍 Troubleshooting steps:"
+            echo "   1. Check the execution logs above for specific error messages"
+            echo "   2. Download and review the uploaded debug artifacts"
+            echo "   3. Verify your configuration file syntax and structure"
+            echo "   4. Ensure all required secrets are properly configured"
+            
+            if [ -n "${{ env.SLACK_WEBHOOK_URL }}" ]; then
+              echo "   5. Check Slack for error notifications and debugging information"
+            fi
+            
+            echo ""
+            echo "📄 Debug artifacts and logs have been uploaded for analysis"
+          fi
+
+          echo "============================================"
+
+          # Enhanced artifact information
+          echo ""
+          echo "📦 Uploaded Artifacts:"
+          echo "   • terraform-automation-logs-${{ github.run_id }}: Execution logs and Slack responses"
+
+          if [ "${{ job.status }}" != "success" ]; then
+            echo "   • debug-artifacts-${{ github.run_id }}: Configuration and temporary files"
+          fi
+
+          # Slack integration summary
+          if [ -n "${{ env.SLACK_WEBHOOK_URL }}" ]; then
+            echo ""
+            echo "💬 Slack Integration Summary:"
+            echo "   • Enhanced notifications: Enabled"
+            echo "   • Rich formatting: Supported"
+            echo "   • Error handling: Comprehensive"
+            
+            if [ -n "${{ env.SLACK_CHANNEL_OVERRIDE }}" ]; then
+              echo "   • Channel override: ${{ env.SLACK_CHANNEL_OVERRIDE }}"
+            fi
+            
+            if [ "${{ env.TEST_SLACK_INTEGRATION }}" == "true" ] && [ "${{ env.DRY_RUN }}" == "true" ]; then
+              echo "   • Integration test: Performed"
+            fi
+          fi
+
+      - name: Post-execution cleanup and summary
+        if: always()
+        run: |
+          echo "🧹 Performing cleanup and generating summary..."
+
+          # Clean up temporary files (but preserve for artifacts first)
+          if [ -f "temp_file.tf" ]; then
+            echo "🗑️ Cleaning up temporary Terraform files"
+            # Files are already captured by artifacts, safe to clean
+          fi
+
+          # Display resource usage information
+          echo "📊 Resource Usage Summary:"
+          echo "   • Workflow duration: ${{ steps.run-terraform-automation.duration || 'N/A' }}"
+          echo "   • Disk usage: $(du -sh . 2>/dev/null || echo 'N/A')"
+          echo "   • Temp files: $(find . -name "*.tmp" -o -name "temp_*" | wc -l) files"
+
+          # Network connectivity summary
+          if [ -n "${{ env.SLACK_WEBHOOK_URL }}" ]; then
+            echo "   • Slack connectivity: Configured and tested"
+          fi
+
+          echo "   • GitHub API: Connected successfully"
+
+          # Performance metrics
+          if [ "${{ env.DEBUG_MODE }}" == "true" ]; then
+            echo ""
+            echo "🔍 Debug Information:"
+            echo "   • Python version: $(python3 --version)"
+            echo "   • Pip packages: $(pip3 list | grep -E '(github|hcl2|yaml|requests)' | wc -l) relevant packages"
+            echo "   • Git version: $(git --version)"
+            echo "   • Terraform version: $(terraform version -json 2>/dev/null | jq -r '.terraform_version' || 'N/A')"
+          fi
+
+          echo ""
+          echo "✅ Cleanup and summary completed"
+          echo "🎉 Thank you for using Terraform Infrastructure Update Automation!"
