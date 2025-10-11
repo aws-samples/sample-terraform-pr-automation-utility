@@ -140,8 +140,8 @@ Your GitHub token must have the following permissions:
 
 ```bash
 # Clone the automation tool repository
-git clone https://github.com/your-org/terraform-automation-tool.git
-cd terraform-automation-tool
+git clone https://github.com/aws-samples/sample-terraform-pr-automation-utility
+cd sample-terraform-pr-automation-utility
 
 # Copy example configuration
 cp examples/config.example.yaml config.yaml
@@ -384,8 +384,8 @@ settings:
 
 ### 1. Clone and Setup
 ```bash
-git clone https://github.com/your-org/terraform-automation-tool.git
-cd terraform-automation-tool
+git clone https://github.com/aws-samples/sample-terraform-pr-automation-utility
+cd sample-terraform-pr-automation-utility
 pip3 install -r requirements.txt
 ```
 
@@ -1172,8 +1172,8 @@ curl -X POST -H 'Content-type: application/json' \
 
 ```bash
 # Clone and set up development environment
-git clone https://github.com/your-org/terraform-automation-tool.git
-cd terraform-automation-tool
+git clone https://github.com/aws-samples/sample-terraform-pr-automation-utility
+cd sample-terraform-pr-automation-utility
 
 # Create virtual environment
 python -m venv venv
@@ -1189,7 +1189,7 @@ pip install -r requirements-dev.txt
 ### Code Structure
 
 ```
-terraform-automation-tool/
+sample-terraform-pr-automation-utility/
 ├── main.py                    # Main application logic with enhanced Slack integration
 ├── config.yaml               # Example configuration with Slack settings
 ├── requirements.txt          # Python dependencies
